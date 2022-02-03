@@ -1,0 +1,221 @@
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+package server
+
+import (
+	"bytes"
+	"compress/gzip"
+	"fmt"
+	"io"
+	"io/ioutil"
+	"net/http"
+	"project/pkg/fuseutil/console"
+	"reflect"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
+	jsoniter "github.com/json-iterator/go"
+	"github.com/pkg/errors"
+)
+
+const _MBx1 = 1024 * 1024
+
+type MapValidate map[string][]interface{}
+type M map[string]interface{}
+
+const (
+	Authorization = "Authorization"
+	ApiKey        = "ApiKey"
+	ApiKeyParam   = "api_key"
+)
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+func (c *Context) GetAccessToken() string {
+	return c.Request.Header.Get(Authorization)
+}
+
+func (c *Context) GetApiKey() string {
+	return c.Request.Header.Get(ApiKey)
+}
+
+func (c *Context) GetApiKeyParam() string {
+	return c.Query(ApiKeyParam)
+}
+
+func (c *Context) User() string {
+	return c.Request.Header.Get(_AtUser)
+}
+
+func (c *Context) Query(v string) string {
+	return Xss.Sanitize(c.Request.URL.Query().Get(v))
+}
+
+func (c *Context) Bind(v interface{}) *Context {
+	if e := jsoniter.NewDecoder(c.Request.Body).Decode(&v); e != nil {
+		_ = c.ToJson(http.StatusBadRequest, e.Error())
+		return c
+	}
+	c.core.body, _ = jsoniter.Marshal(v)
+	if reflect.TypeOf(v).String() == "*map[string]string" {
+		console.ERROR(errors.New("error: Bind() do not use map"))
+		time.Sleep(time.Millisecond * 200)
+		return c
+	}
+	// XSS
+	var x = reflect.ValueOf(v).Elem()
+	for i := 0; i < x.NumField(); i++ {
+		if x.Field(i).Type().String() == "string" {
+			//sample := strings.ReplaceAll(strings.TrimSpace(x.Field(i).String()), "<", "&lt;")
+			x.Field(i).SetString(Xss.Sanitize(x.Field(i).String()))
+		}
+	}
+	return c
+}
+
+func (c *Context) GetBody() ([]byte, error) {
+	if c.Request.Header.Get("Content-Encoding") == "gzip" {
+		//gzip 压缩
+		body, err := gzip.NewReader(c.Request.Body)
+		if err != nil {
+			return nil, err
+		}
+		defer body.Close()
+		data, err := ioutil.ReadAll(body)
+		if err != nil {
+			return nil, err
+		}
+		return data, nil
+	}
+
+	body := c.Request.Body
+	defer body.Close()
+	data, err := ioutil.ReadAll(body)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func (c *Context) Validate(fields MapValidate) *Context {
+	for k, v := range fields {
+		if len(v) != 2 {
+			continue
+		}
+		switch reflect.TypeOf(v[0]).String() {
+		case "string":
+			s := strings.ReplaceAll(v[0].(string), "\n", "")
+			if !regexp.MustCompile(v[1].(string)).MatchString(s) {
+				_ = c.ToJson(http.StatusBadRequest, fmt.Sprintf("字段 '%s' 未通过正则: %s", k, v[1]))
+				panic(nil)
+			}
+		case "int":
+			ms := strings.Split(v[1].(string), ",")
+			for i := range ms {
+				vs := strings.Split(ms[i], "=")
+				if len(vs) != 2 {
+					continue
+				}
+				var bad bool
+				switch vs[0] {
+				case "min":
+					_n, _ := strconv.Atoi(vs[1])
+					if v[0].(int) < _n {
+						bad = true
+					}
+				case "max":
+					_n, _ := strconv.Atoi(vs[1])
+					if v[0].(int) > _n {
+						bad = true
+					}
+				}
+				if bad {
+					_ = c.ToJson(http.StatusBadRequest, fmt.Sprintf("字段 '%s' 未通过校验: %s", k, v[1]))
+					panic(nil)
+
+				}
+			}
+		}
+	}
+	return c
+}
+
+func (c *Context) Redirect(url string) error {
+	http.Redirect(c.Response, c.Request, url, 308)
+	return nil
+}
+
+func (c *Context) ToContent(content io.ReadSeeker, name string) error {
+	if name != "" {
+		c.Response.Header().Add("Content-Disposition", fmt.Sprintf(`attachment; filename=%s`, name))
+	}
+	rangeValue := c.Response.Header().Get("Range")
+	if rangeValue == "" {
+		rangeValue = "0-0"
+	}
+	c.Response.Header().Set("Range", func() string {
+		rn := regexp.MustCompile(`(\d+)-(\d+)?`).FindString(rangeValue)
+		start, e := strconv.ParseInt(strings.Split(rn, "-")[0], 10, 64)
+		if e != nil {
+			panic(errors.Wrap(e, "> strconv.ParseInt"))
+		}
+		return fmt.Sprintf("bytes=%d-%d", start, start+1024*1024) // 1MB
+	}())
+	http.ServeContent(c.Response, c.Request, name, time.Now(), content)
+	return nil
+}
+
+func (c *Context) ToJson(code int, message string, v ...interface{}) error {
+	if len(v) != 0 {
+		c.core.writeJson(c.Response, code, message, v[0])
+	} else {
+		c.core.writeJson(c.Response, code, message, nil)
+	}
+	return nil
+}
+
+func (c *Context) ToJson0000(v ...interface{}) error {
+	if len(v) != 0 {
+		return c.ToJson(0000, "success", v[0])
+	} else {
+		return c.ToJson(0000, "success", nil)
+	}
+}
+
+func (c *Context) ToJson200(v ...interface{}) error {
+	if len(v) != 0 {
+		return c.ToJson(http.StatusOK, "", v[0])
+	} else {
+		return c.ToJson(http.StatusOK, "", nil)
+	}
+}
+
+func (c *Context) ToJson400(message string, v ...interface{}) error {
+	if len(v) != 0 {
+		return c.ToJson(http.StatusOK, message, v[0])
+	} else {
+		return c.ToJson(http.StatusOK, message, nil)
+	}
+}
+
+func (c *Context) ToJson403(message string, v ...interface{}) error {
+	if len(v) != 0 {
+		return c.ToJson(http.StatusOK, message, v[0])
+	} else {
+		return c.ToJson(http.StatusOK, message, nil)
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+func GzipWrite(data *[]byte) ([]byte, error) {
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	defer func() { _ = gz.Close() }()
+	if _, e := gz.Write(*data); e != nil {
+		return nil, errors.Wrap(e, "> gz.Write")
+	}
+	return buf.Bytes(), nil
+}
