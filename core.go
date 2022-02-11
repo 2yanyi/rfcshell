@@ -3,24 +3,23 @@ package rfcshell
 import (
 	"errors"
 	"fmt"
-	"github.com/utilgo/errcause"
 	"net/http"
 	"strings"
+
+	"github.com/utilgo/errcause"
 )
 
-func (sh serverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (sh ServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer errcause.Recover()
 
-	// route check
 	if _, has := multiplexer[r.URL.Path]; !has {
 		w.WriteHeader(404)
 		w.Write([]byte("404"))
 		return
 	}
 
-	// route front hook
-	if sh.FrontHook != nil {
-		_ = sh.FrontHook(w, r)
+	if hook != nil {
+		_ = hook(w, r) // requestHookFunction
 	}
 
 	// route matching
@@ -38,25 +37,30 @@ func (sh serverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (sh *serverHandler) Route(url string, handles ...handleFunc) *serverHandler {
+func (sh *ServerHandler) Route(url string, handles ...handleFunc) *ServerHandler {
 	prefix := sh.prefix + url
 	multiplexer[prefix] = handles
-	return &serverHandler{prefix: prefix}
+	return &ServerHandler{prefix: prefix}
 }
 
-func New(addr string) *serverHandler {
+func New(addr string) *ServerHandler {
 	fmt.Printf("bind %s\n", addr)
-	return &serverHandler{Server: &http.Server{Addr: addr, Handler: new(serverHandler)}}
+	return &ServerHandler{Server: &http.Server{Addr: addr, Handler: new(ServerHandler)}}
+}
+
+func SetRequestHookFunction(handle handleFunc) {
+	hook = handle
+}
+
+type ServerHandler struct {
+	Server *http.Server
+	prefix string
 }
 
 type handleFunc func(w http.ResponseWriter, r *http.Request) error
 
-type serverHandler struct {
-	Server    *http.Server
-	prefix    string
-	FrontHook handleFunc
-}
-
 var multiplexer = make(map[string][]handleFunc)
+
+var hook handleFunc
 
 var Next = errors.New("")

@@ -2,10 +2,10 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"net/http"
-	rfcshell "r"
+	"r/console"
+	"r/rfcshell"
+	"time"
 )
 
 func main() {
@@ -25,15 +25,18 @@ func main() {
 }
 
 func test1(w http.ResponseWriter, r *http.Request) error {
-	fmt.Println("call /user", r.Header.Get("User"))
+	//fmt.Println("call /user", r.Header.Get("User"))
 	return nil
 }
+
 func test2(w http.ResponseWriter, r *http.Request) error {
-	fmt.Println("call /user/info")
+	//fmt.Println("call /user/info")
 	return rfcshell.Next
 }
+
 func test3(w http.ResponseWriter, r *http.Request) error {
-	fmt.Println("call /user/info2")
+	//fmt.Println("call /user/info2")
+	time.Sleep(time.Millisecond * 200)
 	return write(w, writeJson{
 		Code:    0,
 		Message: "success",
@@ -42,7 +45,7 @@ func test3(w http.ResponseWriter, r *http.Request) error {
 }
 
 func write(w http.ResponseWriter, data interface{}) error {
-	jss, _ := json.Marshal(data)
+	jss, _ := console.JsonMarshal(data, "")
 	_, _ = w.Write(jss)
 	return nil
 }
@@ -52,6 +55,3 @@ type writeJson struct {
 	Message string `json:"message"`
 	Data    interface{}
 }
-
-// RFC Shell
-// rfcshell.Route()
