@@ -2,7 +2,6 @@ package rfcshell
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -11,6 +10,7 @@ import (
 
 func (sh ServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer errcause.Recover()
+	defer r.Body.Close()
 
 	if _, has := multiplexer[r.URL.Path]; !has {
 		w.WriteHeader(404)
@@ -44,7 +44,6 @@ func (sh *ServerHandler) Route(url string, handles ...handleFunc) *ServerHandler
 }
 
 func New(addr string) *ServerHandler {
-	fmt.Printf("bind %s\n", addr)
 	return &ServerHandler{Server: &http.Server{Addr: addr, Handler: new(ServerHandler)}}
 }
 
