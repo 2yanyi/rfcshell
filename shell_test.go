@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// 定义全局请求钩子
+// 定义全局请求 HOOK
 func requestHookFunction(w http.ResponseWriter, r *http.Request) error {
 	fmt.Println("call requestHookFunction")
 
@@ -27,12 +27,12 @@ func router(sh *ServerHandler) *ServerHandler {
 // Test main
 func Test(t *testing.T) {
 	SetRequestHookFunction(requestHookFunction)
-	println(
-		router(New("127.0.0.1:2000")).Server.ListenAndServe(),
-	)
+	if err := router(New("127.0.0.1:2000")).Server.ListenAndServe(); err != nil {
+		println(err.Error())
+	}
 }
 
-///////////////////////
+// test handles ...
 
 func handle1(w http.ResponseWriter, r *http.Request) error {
 	fmt.Println("call handle1")
@@ -46,5 +46,6 @@ func handle2(w http.ResponseWriter, r *http.Request) error {
 
 func handle3(w http.ResponseWriter, r *http.Request) error {
 	fmt.Println("call handle3")
-	return Next
+	w.Write([]byte("Hello World"))
+	return nil
 }
